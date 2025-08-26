@@ -1,0 +1,30 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id       Int       @id @default(autoincrement())
+  email    String?   @unique
+  name     String?
+  accounts Account[]
+}
+
+model Account {
+  id Int  @id @default(autoincrement())
+  userId  Int
+  provider  Provider
+  providerAccountId String   @unique
+  createdAt         DateTime @default(now())
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+
+enum Provider {
+  google
+  github
+}
