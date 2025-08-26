@@ -3,45 +3,40 @@ import session from "express-session";
 import dotenv from "dotenv";
 import { PrismaClient } from "@prisma/client";
 import { generateState, generateCodeVerifier } from "arctic";
-import { Google } from "arctic"; // ✅ use provider client
-
+import { Google } from "arctic";
 dotenv.config();
-
 const app = express();
 const port = 8080;
 const prisma = new PrismaClient();
 
-// 🟢 Session middleware
+
 app.use(
   session({
     secret: process.env.SESSION_SECRET,
     resave: false,
     saveUninitialized: true,
     cookie: {
-      secure: false, // set true if using HTTPS in production
+      secure: false, 
       httpOnly: true,
-      maxAge: 1000 * 60 * 60 * 24, // 1 day
+      maxAge: 1000 * 60 * 60 * 24,
     },
   })
 );
 
-// 🟢 Initialize Arctic Google client
 const google = new Google(
   process.env.GOOGLE_CLIENT_ID,
   process.env.GOOGLE_CLIENT_SECRET,
-  "http://localhost:8080/callback" // must match Google Console settings
+  "http://localhost:8080/google/callback"
 );
 
-// 🟢 Login route
+
 app.get("/login", async (req, res) => {
   const state = generateState();
   const codeVerifier = generateCodeVerifier();
 
-  // Save values in session for later verification
   req.session.state = state;
   req.session.codeVerifier = codeVerifier;
 
-  // Build the Google auth URL
   const url = await google.createAuthorizationURL(state, codeVerifier, {
     scopes: ["openid", "email", "profile"],
   });
@@ -49,8 +44,9 @@ app.get("/login", async (req, res) => {
   res.redirect(url.toString());
 });
 
-// 🟢 Callback route
-app.get("/callback", async (req, res) => {
+
+
+app.get("/google/callback", async (req, res) => {
   const code = req.query.code;
   const state = req.query.state;
 
@@ -63,28 +59,24 @@ app.get("/callback", async (req, res) => {
   }
 
   try {
-    // Exchange code + codeVerifier for tokens
     const tokens = await google.validateAuthorizationCode(
       code.toString(),
       req.session.codeVerifier
     );
 
-    // Fetch user info from Google
     const userInfoRes = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
       headers: { Authorization: `Bearer ${tokens.accessToken}` },
     });
     const profile = await userInfoRes.json();
 
-    // 1. Check if account exists (by providerAccountId)
     let account = await prisma.account.findUnique({
-      where: { providerAccountId: profile.sub }, // Google's unique user ID
+      where: { providerAccountId: profile.sub },
       include: { user: true },
     });
 
     let user;
 
     if (account) {
-      // 2. If account exists, update tokens
       user = await prisma.user.update({
         where: { id: account.userId },
         data: {
@@ -94,14 +86,12 @@ app.get("/callback", async (req, res) => {
               data: {
                 provider: "google",
                 providerAccountId: profile.sub,
-                // (Optional: add token storage fields here if you extend Account model)
               },
             },
           },
         },
       });
     } else {
-      // 3. If account doesn’t exist, create new user + account
       user = await prisma.user.create({
         data: {
           email: profile.email,
@@ -115,8 +105,6 @@ app.get("/callback", async (req, res) => {
         },
       });
     }
-
-    // 4. Save session
     req.session.userId = user.id;
 
     res.redirect("/dashboard");
@@ -126,8 +114,6 @@ app.get("/callback", async (req, res) => {
   }
 });
 
-
-// 🟢 Protected route example
 app.get("/dashboard", async (req, res) => {
   if (!req.session.userId) {
     return res.redirect("/login");
